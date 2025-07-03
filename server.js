@@ -16,10 +16,10 @@ let sitesCollection;
 async function startServer() {
   try {
     await client.connect();
-    const db = client.db('test'); // ou o nome do seu banco
+    const db = client.db('test'); // troque 'test' pelo nome do seu banco, se quiser
     sitesCollection = db.collection('sites');
 
-    // Cria índice único para subdomain (se ainda não tiver)
+    // Cria índice único para subdomain, se ainda não existir
     await sitesCollection.createIndex({ subdomain: 1 }, { unique: true });
 
     app.post('/api/create', async (req, res) => {
@@ -32,13 +32,17 @@ async function startServer() {
           return res.status(400).json({ error: 'Nome do subdomínio inválido. Use letras minúsculas, números e hífens.' });
         }
 
-        await sitesCollection.insertOne({ subdomain, htmlContent });
-        res.status(200).json({ message: 'Site criado com sucesso.' });
+        // Atualiza ou cria documento
+        await sitesCollection.updateOne(
+          { subdomain },
+          { $set: { htmlContent } },
+          { upsert: true }
+        );
+
+        console.log(`Site criado/atualizado: ${subdomain}`);
+        res.status(200).json({ message: 'Site criado/atualizado com sucesso.' });
       } catch (error) {
-        if (error.code === 11000) {
-          return res.status(409).json({ error: 'Subdomínio já existe.' });
-        }
-        console.error('Erro ao criar site:', error);
+        console.error('Erro ao criar/atualizar site:', error);
         res.status(500).json({ error: 'Erro interno no servidor.' });
       }
     });
@@ -46,13 +50,14 @@ async function startServer() {
     app.get('/', async (req, res) => {
       try {
         const host = req.headers.host;
-        const mainDomain = 'veedeo.xyz';
+        const mainDomain = 'veedeo.xyz'; // ajuste para o seu domínio real!
 
         if (!host.endsWith(mainDomain)) {
           return res.status(400).send('Domínio inválido.');
         }
 
-        const subdomain = host.replace(`.${mainDomain}`, '');
+        // Extrai o subdomínio removendo o domínio principal
+        const subdomain = host.slice(0, host.length - mainDomain.length - 1);
 
         if (!subdomain || subdomain === 'www' || subdomain === mainDomain) {
           return res.status(400).send('Subdomínio inválido ou não informado.');
