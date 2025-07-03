@@ -5,22 +5,39 @@ const { MongoClient } = require('mongodb');
 const app = express();
 const port = process.env.PORT || 3000;
 
-app.use(cors());
-app.use(express.json());
-
+// A URI hardcoded mesmo, mas aqui a gente loga pra garantir
 const uri = "mongodb+srv://acaciofariav:bDUIR6AjObVu3zjp@cluster0.jxj30jn.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0";
+
+console.log('MongoDB URI (para debug):', uri);
+
 const client = new MongoClient(uri);
 
 let sitesCollection;
 
 async function startServer() {
   try {
+    console.log('Tentando conectar no MongoDB...');
     await client.connect();
-    const db = client.db('test'); // troque 'test' pelo nome do seu banco, se quiser
+    console.log('MongoDB conectado com sucesso!');
+
+    const db = client.db('test'); // Ajuste se quiser outro banco
     sitesCollection = db.collection('sites');
 
     // Cria índice único para subdomain, se ainda não existir
     await sitesCollection.createIndex({ subdomain: 1 }, { unique: true });
+    console.log('Índice criado para subdomain');
+
+    app.use(cors());
+    app.use(express.json());
+
+    // Middleware pra garantir que sitesCollection existe
+    app.use((req, res, next) => {
+      if (!sitesCollection) {
+        console.error('sitesCollection NÃO está definido ainda!');
+        return res.status(500).json({ error: 'Banco de dados não inicializado.' });
+      }
+      next();
+    });
 
     app.post('/api/create', async (req, res) => {
       try {
@@ -32,7 +49,6 @@ async function startServer() {
           return res.status(400).json({ error: 'Nome do subdomínio inválido. Use letras minúsculas, números e hífens.' });
         }
 
-        // Atualiza ou cria documento
         await sitesCollection.updateOne(
           { subdomain },
           { $set: { htmlContent } },
@@ -50,22 +66,24 @@ async function startServer() {
     app.get('/', async (req, res) => {
       try {
         const host = req.headers.host;
-        const mainDomain = 'veedeo.xyz'; // ajuste para o seu domínio real!
+        const mainDomain = 'veedeo.xyz'; // seu domínio real
 
-        if (!host.endsWith(mainDomain)) {
+        if (!host || !host.endsWith(mainDomain)) {
+          console.warn(`Domínio inválido: ${host}`);
           return res.status(400).send('Domínio inválido.');
         }
 
-        // Extrai o subdomínio removendo o domínio principal
         const subdomain = host.slice(0, host.length - mainDomain.length - 1);
 
         if (!subdomain || subdomain === 'www' || subdomain === mainDomain) {
+          console.warn(`Subdomínio inválido ou não informado: ${subdomain}`);
           return res.status(400).send('Subdomínio inválido ou não informado.');
         }
 
         const site = await sitesCollection.findOne({ subdomain });
 
         if (!site) {
+          console.warn(`Subdomínio não encontrado: ${subdomain}`);
           return res.status(404).send('Subdomínio não encontrado.');
         }
 
