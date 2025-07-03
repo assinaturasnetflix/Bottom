@@ -1,82 +1,102 @@
 const express = require('express');
-const cors = require('cors');
-const fs = require('fs');
+const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const port = process.env.PORT || 3000;
 
-// Middleware para liberar CORS para qualquer origem
-app.use(cors());
-
-// Middleware para interpretar JSON no corpo das requisições
+// Middleware para receber JSON
 app.use(express.json());
 
-// Caminho do arquivo que armazena os sites criados
-const dataFile = path.join(__dirname, 'sites.json');
-
-// Função para ler o arquivo JSON
-function readData() {
-  try {
-    const content = fs.readFileSync(dataFile, 'utf-8');
-    return JSON.parse(content);
-  } catch (e) {
-    return {};
-  }
-}
-
-// Função para salvar dados no arquivo JSON
-function saveData(data) {
-  fs.writeFileSync(dataFile, JSON.stringify(data, null, 2));
-}
-
-// Rota para criar um subdomínio com conteúdo
-app.post('/api/create', (req, res) => {
-  const { subdomain, htmlContent } = req.body;
-
-  if (!subdomain || !htmlContent) {
-    return res.status(400).json({ message: 'Subdomínio e conteúdo são obrigatórios.' });
-  }
-
-  // Validação simples do subdomínio (letras, números e hífen)
-  if (!/^[a-z0-9-]+$/.test(subdomain)) {
-    return res.status(400).json({ message: 'Subdomínio inválido. Use apenas letras, números e hífen.' });
-  }
-
-  const data = readData();
-
-  if (data[subdomain]) {
-    return res.status(400).json({ message: 'Subdomínio já existe. Escolha outro.' });
-  }
-
-  data[subdomain] = htmlContent;
-  saveData(data);
-
-  res.json({ message: `Site criado em https://${subdomain}.veedeo.xyz` });
-});
-
-// Middleware para capturar todas as outras requisições e entregar o conteúdo do subdomínio
-app.get('*', (req, res) => {
-  const host = req.headers.host; // ex: subdominio.veedeo.xyz
-  const hostname = host.split(':')[0]; // remove a porta se existir
-  const parts = hostname.split('.');
-
-  // Se não houver subdomínio, entrega o index.html
-  if (parts.length < 3) {
-    res.sendFile(path.join(__dirname, 'index.html'));
-    return;
-  }
-
-  const subdomain = parts[0];
-  const data = readData();
-
-  if (data[subdomain]) {
-    res.send(data[subdomain]);
+// Banco SQLite (arquivo único)
+const db = new sqlite3.Database(path.join(__dirname, 'sites.db'), (err) => {
+  if (err) {
+    console.error('Erro ao abrir o banco SQLite:', err.message);
   } else {
-    res.status(404).send('<h1>Subdomínio não encontrado</h1>');
+    console.log('Conectado ao banco SQLite.');
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
+// Cria tabela se não existir
+db.run(`
+  CREATE TABLE IF NOT EXISTS sites (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    subdomain TEXT UNIQUE,
+    htmlContent TEXT
+  )
+`);
+
+// Endpoint para criar site
+app.post('/api/create', (req, res) => {
+  try {
+    const { subdomain, htmlContent } = req.body;
+
+    if (!subdomain || !htmlContent) {
+      return res.status(400).json({ error: 'Subdomínio e conteúdo HTML são obrigatórios.' });
+    }
+
+    // Validação simples do subdomínio
+    if (!/^[a-z0-9-]+$/.test(subdomain)) {
+      return res.status(400).json({ error: 'Nome do subdomínio inválido. Use letras minúsculas, números e hífens.' });
+    }
+
+    // Tenta inserir no banco
+    const sql = `INSERT INTO sites (subdomain, htmlContent) VALUES (?, ?)`;
+
+    db.run(sql, [subdomain, htmlContent], function (err) {
+      if (err) {
+        if (err.message.includes('UNIQUE constraint failed')) {
+          return res.status(409).json({ error: 'Subdomínio já existe.' });
+        } else {
+          console.error('Erro ao inserir no banco:', err);
+          return res.status(500).json({ error: 'Erro interno ao salvar no banco.' });
+        }
+      }
+
+      return res.status(200).json({ message: 'Site criado com sucesso.' });
+    });
+
+  } catch (error) {
+    console.error('Erro interno:', error);
+    return res.status(500).json({ error: 'Erro interno no servidor.' });
+  }
+});
+
+// Endpoint para servir o site pelo subdomínio
+app.get('/', (req, res) => {
+  // Como você vai usar subdomínio com wildcard, pegue o host e extraia o subdomínio
+  const host = req.headers.host; // exemplo: acass.veedeo.xyz
+  const mainDomain = 'veedeo.xyz';
+
+  if (!host.endsWith(mainDomain)) {
+    return res.status(400).send('Domínio inválido.');
+  }
+
+  // Pega o subdomínio
+  const subdomain = host.replace(`.${mainDomain}`, '');
+
+  if (!subdomain || subdomain === 'www' || subdomain === mainDomain) {
+    return res.status(400).send('Subdomínio inválido ou não informado.');
+  }
+
+  // Busca conteúdo no banco
+  db.get(`SELECT htmlContent FROM sites WHERE subdomain = ?`, [subdomain], (err, row) => {
+    if (err) {
+      console.error('Erro ao consultar banco:', err);
+      return res.status(500).send('Erro interno no servidor.');
+    }
+
+    if (!row) {
+      return res.status(404).send('Subdomínio não encontrado.');
+    }
+
+    // Retorna o HTML salvo
+    res.setHeader('Content-Type', 'text/html');
+    res.send(row.htmlContent);
+  });
+});
+
+// Inicia o servidor
+app.listen(port, () => {
+  console.log(`Servidor rodando na porta ${port}`);
 });
