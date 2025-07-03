@@ -43,12 +43,12 @@ app.post('/api/create', (req, res) => {
   data[subdomain] = htmlContent;
   saveData(data);
 
-  res.json({ message: `Site criado em https://${subdomain}.seudominio.com` });
+  res.json({ message: `Site criado em https://${subdomain}.veedeo.xyz` });
 });
 
 // Middleware para capturar o subdomínio e servir o conteúdo
 app.get('*', (req, res) => {
-  const host = req.headers.host; // ex: subdominio.seudominio.com:3000
+  const host = req.headers.host; // ex: subdominio.veedeo.xyz:3000
   const hostname = host.split(':')[0]; // remove a porta se existir
   const parts = hostname.split('.');
 
