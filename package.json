@@ -1,12 +1,16 @@
 {
-  "name": "vercel-subdomains",
+  "name": "subdomain-site-generator",
   "version": "1.0.0",
+  "description": "Backend para criar sites em subdomínios com MongoDB",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.18.2",
-    "sqlite3": "^5.1.6"
+    "mongodb": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }
